@@ -34,6 +34,7 @@ def notes(version: str) -> str:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")  # русский текст в консоли Windows
     if len(sys.argv) != 2 or not re.fullmatch(r"\d+\.\d+\.\d+", sys.argv[1]):
         sys.exit("Использование: python release.py 1.2.3")
     version = sys.argv[1]
