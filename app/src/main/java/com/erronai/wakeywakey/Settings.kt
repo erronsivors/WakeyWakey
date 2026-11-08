@@ -26,6 +26,11 @@ data class Settings(
     val mathToStop: Boolean = false, // задачка, чтобы нажать «Завершено» в экстриме
     val autoUpdate: Boolean = true,
     val sounds: List<Sound> = emptyList(),
+    val bdHour: Int = 10,            // дни рождения: во сколько напоминать
+    val bdMinute: Int = 0,
+    val bdMode: Mode = Mode.LIGHT,   // как напоминать о днях рождения
+    val bdAdvanceDays: Int = 1,      // дополнительно напомнить за N дней; 0 — только в сам день
+    val noteAdvance: Int = 1440,     // записи «как в настройках»: предупредить за N минут; 0 — нет
 ) {
     fun snoozeMinutes() = if (snooze > 0) snooze else interval
 }
@@ -56,6 +61,11 @@ object Prefs {
             forceVolume = p.getInt("forceVolume", d.forceVolume),
             mathToStop = p.getBoolean("mathToStop", d.mathToStop),
             autoUpdate = p.getBoolean("autoUpdate", d.autoUpdate),
+            bdHour = p.getInt("bdHour", d.bdHour),
+            bdMinute = p.getInt("bdMinute", d.bdMinute),
+            bdMode = runCatching { Mode.valueOf(p.getString("bdMode", d.bdMode.name)!!) }.getOrDefault(d.bdMode),
+            bdAdvanceDays = p.getInt("bdAdvanceDays", d.bdAdvanceDays),
+            noteAdvance = p.getInt("noteAdvance", d.noteAdvance),
             sounds = runCatching {
                 val a = JSONArray(p.getString("sounds", "[]"))
                 (0 until a.length()).map { a.getJSONObject(it).let { j -> Sound(j.getString("id"), j.getString("name"), j.getString("uri")) } }
@@ -71,6 +81,8 @@ object Prefs {
             putInt("snooze", n.snooze); putString("sound", n.sound); putBoolean("vibrate", n.vibrate)
             putBoolean("rampUp", n.rampUp); putInt("forceVolume", n.forceVolume); putBoolean("mathToStop", n.mathToStop)
             putBoolean("autoUpdate", n.autoUpdate)
+            putInt("bdHour", n.bdHour); putInt("bdMinute", n.bdMinute); putString("bdMode", n.bdMode.name)
+            putInt("bdAdvanceDays", n.bdAdvanceDays); putInt("noteAdvance", n.noteAdvance)
             putString("sounds", JSONArray().apply {
                 n.sounds.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("uri", it.uri)) }
             }.toString())

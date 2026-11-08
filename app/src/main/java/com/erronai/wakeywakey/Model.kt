@@ -15,6 +15,9 @@ enum class Mode(val title: String, val short: String) {
     EXTREME("Экстрим", "Будильник на весь экран: звонит поверх блокировки и беззвучного режима и повторяется через заданный интервал, пока не отметите «Завершено»."),
 }
 
+/** Обычная запись или день рождения (повторяется каждый год, время — из настроек). */
+enum class Kind { NOTE, BIRTHDAY }
+
 enum class Repeat(val title: String) {
     NONE("Не повторять"), DAILY("Каждый день"), WEEKDAYS("По будням"), WEEKLY("Каждую неделю"),
     MONTHLY("Каждый месяц"), YEARLY("Каждый год");
@@ -52,12 +55,22 @@ data class Reminder(
     val mode: Mode? = null,          // null — как в настройках
     val sound: String? = null,       // null — как в настройках
     val interval: Int? = null,       // минуты между повторами; null — как в настройках
-    val advance: Int = 0,            // минут до события — заранее лёгкое уведомление; 0 — нет
+    val advance: Int = 0,            // минут до события — заранее тихое уведомление; 0 — нет; -1 — как в настройках
     val done: Boolean = false,
     val doneAt: Long = 0,
     val nextRing: Long? = null,
     val fired: Boolean = false,
+    val kind: Kind = Kind.NOTE,
+    val bdMonth: Int = 0,            // день рождения: месяц (0–11 как в Calendar)
+    val bdDay: Int = 0,              // число
+    val bdYear: Int = 0,             // год рождения; 0 — неизвестен
 ) {
+    val isBirthday get() = kind == Kind.BIRTHDAY
+
+    /** Следующее срабатывание после [after] (и строго позже текущего [time]). */
+    fun nextAfter(after: Long): Long =
+        if (isBirthday) Birthdays.next(this, maxOf(after, time)) else repeat.next(time, after)
+
     val overdue get() = !done && time <= System.currentTimeMillis()
 
     fun toJson() = JSONObject().apply {
@@ -65,6 +78,7 @@ data class Reminder(
         put("repeat", repeat.name); mode?.let { put("mode", it.name) }; sound?.let { put("sound", it) }
         interval?.let { put("interval", it) }; put("advance", advance); put("done", done); put("doneAt", doneAt)
         nextRing?.let { put("nextRing", it) }; put("fired", fired)
+        put("kind", kind.name); put("bdMonth", bdMonth); put("bdDay", bdDay); put("bdYear", bdYear)
     }
 
     companion object {
@@ -82,6 +96,10 @@ data class Reminder(
             doneAt = j.optLong("doneAt"),
             nextRing = if (j.has("nextRing")) j.getLong("nextRing") else null,
             fired = j.optBoolean("fired"),
+            kind = runCatching { Kind.valueOf(j.optString("kind")) }.getOrDefault(Kind.NOTE),
+            bdMonth = j.optInt("bdMonth"),
+            bdDay = j.optInt("bdDay"),
+            bdYear = j.optInt("bdYear"),
         )
     }
 }

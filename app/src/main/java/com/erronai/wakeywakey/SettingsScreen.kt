@@ -28,10 +28,15 @@ fun SettingsScreen(onBack: () -> Unit) {
     LaunchedEffect(Unit) { App.messages.receiveAsFlow().collect { snackbar.showSnackbar(it) } }
 
     fun set(f: (Settings) -> Settings) {
-        val before = Prefs.s.value.mode
+        val before = Prefs.s.value
         Prefs.update(f)
-        // режим по умолчанию влияет на то, как поставлены будильники у записей «как в настройках»
-        if (Prefs.s.value.mode != before) Scheduler.rescheduleAll(ctx)
+        val after = Prefs.s.value
+        // время дней рождения поменялось — переставляем их на новое время
+        if (after.bdHour != before.bdHour || after.bdMinute != before.bdMinute) Birthdays.retime(ctx)
+        // режим и «заранее» влияют на то, как поставлены будильники у записей «как в настройках»
+        else if (after.mode != before.mode || after.bdMode != before.bdMode || after.bdAdvanceDays != before.bdAdvanceDays ||
+            after.noteAdvance != before.noteAdvance)
+            Scheduler.rescheduleAll(ctx)
     }
 
     Scaffold(
@@ -48,6 +53,25 @@ fun SettingsScreen(onBack: () -> Unit) {
                 SectionTitle("Как напоминать по умолчанию")
                 Mode.entries.forEach { m -> RadioRow(m.title, m.short, s.mode == m) { set { it.copy(mode = m) } } }
                 Text("У каждой записи режим можно выбрать отдельно.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
+            item {
+                SectionTitle("Дни рождения")
+                ValueRow("Время напоминания", "В день рождения в " + "%02d:%02d".format(s.bdHour, s.bdMinute),
+                    Icons.Default.Schedule) { dialog = "bdTime" }
+                ValueRow("Предупредить заранее",
+                    if (s.bdAdvanceDays == 0) "Нет, только в сам день" else "За ${minutesText(s.bdAdvanceDays * 1440)} — тихим уведомлением",
+                    Icons.Default.NotificationsNone) { dialog = "bdAdvance" }
+                Text("Как напоминать о днях рождения", style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp))
+                Mode.entries.forEach { m -> RadioRow(m.title, null, s.bdMode == m) { set { it.copy(bdMode = m) } } }
+            }
+            item {
+                SectionTitle("Предупреждение заранее")
+                ValueRow("Для записей", advanceText(s.noteAdvance) + if (s.noteAdvance > 0) " — тихое уведомление в шторке" else "",
+                    Icons.Default.NotificationsNone) { dialog = "noteAdvance" }
+                Text("Например, накануне вылета придёт уведомление «завтра, 06:00». У записи можно выбрать своё.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
             }
@@ -126,6 +150,24 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
 
     when (dialog) {
+        "noteAdvance" -> ChoiceDialog("Предупреждать о записях заранее",
+            ADVANCES.map { it to if (it == 0) "Нет" else advanceText(it) }, s.noteAdvance,
+            { v -> set { it.copy(noteAdvance = v) } }) { dialog = null }
+        "bdAdvance" -> ChoiceDialog("Предупредить заранее",
+            listOf(0 to "Нет, только в сам день") + listOf(1, 2, 3, 7, 14).map { it to "За ${minutesText(it * 1440)}" },
+            s.bdAdvanceDays, { v -> set { it.copy(bdAdvanceDays = v) } }) { dialog = null }
+        "bdTime" -> {
+            val st = rememberTimePickerState(s.bdHour, s.bdMinute, is24Hour = true)
+            AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text("Время напоминания о днях рождения") },
+                text = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TimePicker(st) } },
+                confirmButton = {
+                    TextButton(onClick = { set { it.copy(bdHour = st.hour, bdMinute = st.minute) }; dialog = null }) { Text("Готово") }
+                },
+                dismissButton = { TextButton(onClick = { dialog = null }) { Text("Отмена") } },
+            )
+        }
         "interval" -> ChoiceDialog("Повторять каждые", INTERVALS.map { it to minutesText(it) }, s.interval, { v -> set { it.copy(interval = v) } }) { dialog = null }
         "ring" -> ChoiceDialog("Сколько звонит экстрим", listOf(30, 60, 120, 180, 300, 600).map { it to secondsText(it) }, s.ringSeconds,
             { v -> set { it.copy(ringSeconds = v) } }) { dialog = null }

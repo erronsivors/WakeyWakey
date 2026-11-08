@@ -84,11 +84,11 @@ class AlarmActivity : ComponentActivity() {
                 Icon(Icons.Default.Alarm, null, tint = Color(0xFFFFB300), modifier = Modifier.size(56.dp))
                 Text(clock, color = Color.White, fontSize = 72.sp, fontWeight = FontWeight.Light)
                 Spacer(Modifier.height(16.dp))
-                Text(r?.title ?: "", color = Color.White, style = MaterialTheme.typography.headlineMedium,
+                Text(r?.displayTitle() ?: "", color = Color.White, style = MaterialTheme.typography.headlineMedium,
                     textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold)
-                if (!r?.note.isNullOrBlank()) {
+                if (r != null && (r.isBirthday || r.note.isNotBlank())) {
                     Spacer(Modifier.height(8.dp))
-                    Text(r!!.note, color = Color(0xFFC7C4D9), style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+                    Text(if (r.isBirthday) r.body() else r.note, color = Color(0xFFC7C4D9), style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
                 }
                 if (r != null && ringing != id) {
                     Spacer(Modifier.height(8.dp))
@@ -118,7 +118,7 @@ class AlarmActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxWidth().height(72.dp),
                 ) {
                     Icon(Icons.Default.Check, null, Modifier.size(28.dp)); Spacer(Modifier.width(10.dp))
-                    Text("Завершено", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(if (r?.isBirthday == true) "Поздравил" else "Завершено", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(

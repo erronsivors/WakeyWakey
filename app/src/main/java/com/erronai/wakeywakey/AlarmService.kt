@@ -151,7 +151,7 @@ class AlarmService : Service() {
         if (missed && id >= 0) Repo.get(id)?.takeIf { !it.done }?.let { r ->
             val next = r.nextRing?.let { " · снова в ${fmtTime(it)}" } ?: ""
             if (mode == Mode.EXTREME) Notifs.status(this, r, "Пропущено$next")
-            else Notifs.post(this, id, Notifs.base(this, App.CH_STATUS, r, r.note.ifBlank { "Напоминание$next" })
+            else Notifs.post(this, id, Notifs.base(this, App.CH_STATUS, r, r.body() + next)
                 .setSilent(true)
                 .addAction(Notifs.doneAction(this, id))
                 .addAction(Notifs.snoozeAction(this, id))

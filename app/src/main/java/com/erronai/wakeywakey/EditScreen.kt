@@ -23,7 +23,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-val ADVANCES = listOf(0, 5, 10, 15, 30, 60, 120, 180, 1440, 2880, 10080)
+val ADVANCES = listOf(0, 5, 10, 15, 30, 60, 120, 180, 720, 1440, 2880, 10080)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,7 +51,7 @@ fun EditScreen(id: Long?, day: Long, onClose: () -> Unit) {
     var mode by remember { mutableStateOf(orig?.mode) }
     var sound by remember { mutableStateOf(orig?.sound) }
     var interval by remember { mutableStateOf(orig?.interval) }
-    var advance by remember { mutableIntStateOf(orig?.advance ?: 0) }
+    var advance by remember { mutableIntStateOf(orig?.advance ?: -1) }
 
     var dialog by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -144,7 +144,8 @@ fun EditScreen(id: Long?, day: Long, onClose: () -> Unit) {
                     if (interval == null) "Как в настройках (${minutesText(settings.interval)})" else minutesText(interval!!),
                     Icons.Default.Timer) { dialog = "interval" }
             }
-            ValueRow("Предупредить заранее", if (advance == 0) "Нет" else "За ${minutesText(advance)} — тихим уведомлением",
+            ValueRow("Предупредить заранее в шторке",
+                if (advance < 0) "Как в настройках (${advanceText(settings.noteAdvance).lowercase()})" else advanceText(advance),
                 Icons.Default.NotificationsNone) { dialog = "advance" }
 
             if (orig != null && !orig.done) {
@@ -210,7 +211,8 @@ fun EditScreen(id: Long?, day: Long, onClose: () -> Unit) {
             listOf<Pair<Int?, String>>(null to "Как в настройках (${minutesText(settings.interval)})") + INTERVALS.map { it to minutesText(it) },
             interval, { interval = it }) { dialog = null }
         "advance" -> ChoiceDialog("Предупредить заранее",
-            ADVANCES.map { it to if (it == 0) "Нет" else "За ${minutesText(it)}" }, advance, { advance = it }) { dialog = null }
+            listOf(-1 to "Как в настройках (${advanceText(settings.noteAdvance).lowercase()})") + ADVANCES.map { it to advanceText(it) },
+            advance, { advance = it }) { dialog = null }
         "sound" -> SoundDialog(sound, inherit = true, onPick = { sound = it }) { dialog = null }
     }
 

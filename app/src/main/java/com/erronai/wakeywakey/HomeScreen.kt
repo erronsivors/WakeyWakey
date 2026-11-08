@@ -30,11 +30,15 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+/** Что отмечать точкой на дне календаря. */
+data class Mark(val active: Boolean = false, val done: Boolean = false, val birthday: Boolean = false)
+
 /** Запись в конкретный день: для повторяющихся — время именно этого раза. */
 data class Occurrence(val r: Reminder, val at: Long)
 
 /** Все срабатывания записи в промежутке [from, to). */
 fun occurrences(r: Reminder, from: Long, to: Long): List<Long> {
+    if (r.isBirthday) return Birthdays.occurrences(r, from, to)
     if (r.repeat == Repeat.NONE || r.done) return if (r.time in from until to) listOf(r.time) else emptyList()
     val out = mutableListOf<Long>()
     var t = r.time
@@ -52,7 +56,10 @@ fun monthStart(year: Int, month: Int): Calendar = Calendar.getInstance().apply {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(onNew: (Long) -> Unit, onOpen: (Long) -> Unit, onSettings: () -> Unit) {
+fun HomeScreen(
+    tab: Int, onTab: (Int) -> Unit,
+    onNew: (Long) -> Unit, onNewBirthday: (Long?) -> Unit, onOpen: (Long) -> Unit, onSettings: () -> Unit,
+) {
     val ctx = LocalContext.current
     val items by Repo.items.collectAsState()
     val ringing by AlarmService.ringing.collectAsState()
@@ -77,12 +84,16 @@ fun HomeScreen(onNew: (Long) -> Unit, onOpen: (Long) -> Unit, onSettings: () -> 
     val marks = remember(items, year, month) {
         val start = monthStart(year, month)
         val end = (start.clone() as Calendar).apply { add(Calendar.MONTH, 1) }
-        val m = HashMap<Long, Pair<Boolean, Boolean>>()
+        val m = HashMap<Long, Mark>()
         items.forEach { r ->
             occurrences(r, start.timeInMillis, end.timeInMillis).forEach { t ->
                 val d = dayIndex(t)
-                val (a, b) = m[d] ?: (false to false)
-                m[d] = if (r.done) a to true else true to b
+                val k = m[d] ?: Mark()
+                m[d] = when {
+                    r.isBirthday -> k.copy(birthday = true)
+                    r.done -> k.copy(done = true)
+                    else -> k.copy(active = true)
+                }
             }
         }
         m
@@ -97,13 +108,23 @@ fun HomeScreen(onNew: (Long) -> Unit, onOpen: (Long) -> Unit, onSettings: () -> 
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { onNew(selected) },
-                icon = { Icon(Icons.Default.Add, null) },
-                text = { Text("Запись") },
+                onClick = { if (tab == 0) onNew(selected) else onNewBirthday(null) },
+                icon = { Icon(if (tab == 0) Icons.Default.Add else Icons.Default.Cake, null) },
+                text = { Text(if (tab == 0) "Запись" else "День рождения") },
             )
+        },
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(tab == 0, { onTab(0) }, { Icon(Icons.Default.CalendarMonth, null) }, label = { Text("Ежедневник") })
+                NavigationBarItem(tab == 1, { onTab(1) }, { Icon(Icons.Default.Cake, null) }, label = { Text("Дни рождения") })
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { pad ->
+        if (tab == 1) {
+            BirthdayList(items, now, ringing, Modifier.padding(pad), onOpen)
+            return@Scaffold
+        }
         LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(bottom = 96.dp)) {
             if (missing.isNotEmpty()) item {
                 Card(
@@ -171,17 +192,28 @@ fun HomeScreen(onNew: (Long) -> Unit, onOpen: (Long) -> Unit, onSettings: () -> 
                 }
                 if (list.isEmpty()) item { Empty("На этот день ничего нет. Нажмите «Запись», чтобы добавить") }
                 items(list, key = { "${it.r.id}-${it.at}" }) { o ->
-                    ReminderCard(o.r, o.at, now, ringing == o.r.id, onOpen)
+                    if (o.r.isBirthday) BirthdayCard(o.r, o.at, now, ringing == o.r.id, onOpen)
+                    else ReminderCard(o.r, o.at, now, ringing == o.r.id, onOpen)
+                }
+                item {
+                    TextButton(onClick = { onNewBirthday(dayStart) }, modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Icon(Icons.Default.Cake, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                        Text("Добавить день рождения на эту дату")
+                    }
                 }
             } else {
-                val active = items.filter { !it.done }
+                // дни рождения живут на своей вкладке; здесь — только сегодняшние неотмеченные
+                val active = items.filter { !it.done && (!it.isBirthday || it.time <= now || it.nextRing != null) }
                 val attention = active.filter { it.time <= now || it.nextRing != null }.sortedBy { it.time }
                 val upcoming = active.filter { it !in attention }.sortedBy { it.time }
-                val done = items.filter { it.done }.sortedByDescending { it.doneAt }
+                val done = items.filter { it.done && !it.isBirthday }.sortedByDescending { it.doneAt }
                 if (items.isEmpty()) item { Empty("Записей пока нет. Нажмите «Запись», чтобы добавить первую") }
                 if (attention.isNotEmpty()) {
                     item { SectionTitle("Ждут отметки «Завершено»") }
-                    items(attention, key = { "a${it.id}" }) { ReminderCard(it, it.time, now, ringing == it.id, onOpen) }
+                    items(attention, key = { "a${it.id}" }) {
+                        if (it.isBirthday) BirthdayCard(it, it.time, now, ringing == it.id, onOpen)
+                        else ReminderCard(it, it.time, now, ringing == it.id, onOpen)
+                    }
                 }
                 if (upcoming.isNotEmpty()) {
                     item { SectionTitle("Предстоящие") }
@@ -248,7 +280,7 @@ fun ReminderCard(r: Reminder, at: Long, now: Long, isRinging: Boolean, onOpen: (
 
 @Composable
 fun MonthCalendar(
-    year: Int, month: Int, selected: Long, marks: Map<Long, Pair<Boolean, Boolean>>,
+    year: Int, month: Int, selected: Long, marks: Map<Long, Mark>,
     onMonth: (Int) -> Unit, onToday: () -> Unit, onSelect: (Long) -> Unit,
 ) {
     val first = monthStart(year, month)
@@ -301,7 +333,8 @@ fun MonthCalendar(
                                         .background(
                                             when {
                                                 isSel -> MaterialTheme.colorScheme.onPrimary
-                                                mark.first -> MaterialTheme.colorScheme.primary
+                                                mark.active -> MaterialTheme.colorScheme.primary
+                                                mark.birthday -> MaterialTheme.colorScheme.tertiary
                                                 else -> MaterialTheme.colorScheme.outline
                                             }
                                         )
@@ -311,6 +344,68 @@ fun MonthCalendar(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun BirthdayCard(r: Reminder, at: Long, now: Long, isRinging: Boolean, onOpen: (Long) -> Unit) {
+    val ctx = LocalContext.current
+    // сегодняшний день рождения, который ещё не отметили «Поздравил»
+    val pending = r.time <= now && dayIndex(at) == dayIndex(r.time)
+    Card(
+        onClick = { onOpen(r.id) },
+        colors = CardDefaults.cardColors(
+            containerColor = if (pending || isRinging) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainer),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Cake, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                OneLine(r.title, MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
+                val date = SimpleDateFormat("d MMMM", Locale("ru")).format(Date(at))
+                val age = Birthdays.age(r, at)?.let { " · " + plural(it, "год", "года", "лет") }.orEmpty()
+                OneLine("$date · ${Birthdays.untilText(at)}$age", MaterialTheme.typography.bodyMedium, MaterialTheme.colorScheme.onSurfaceVariant)
+                if (r.note.isNotBlank()) OneLine(r.note, MaterialTheme.typography.bodySmall, MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (pending) FilledTonalButton(onClick = { Actions.done(ctx, r.id) }) { Text("Поздравил") }
+        }
+    }
+}
+
+/** Вкладка «Дни рождения»: все дни рождения по ближайшей дате. */
+@Composable
+fun BirthdayList(items: List<Reminder>, now: Long, ringing: Long?, modifier: Modifier, onOpen: (Long) -> Unit) {
+    val list = items.filter { it.isBirthday }.sortedBy { it.time }
+    val todayIdx = dayIndex(now)
+    val today = list.filter { dayIndex(it.time) == todayIdx }
+    val soon = list.filter { dayIndex(it.time) in (todayIdx + 1)..(todayIdx + 30) }
+    val later = list.filter { dayIndex(it.time) > todayIdx + 30 }
+    val s by Prefs.s.collectAsState()
+    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
+        item {
+            Text("Напомню каждый год в " + "%02d:%02d".format(s.bdHour, s.bdMinute) + " · ${s.bdMode.title.lowercase()}" +
+                if (s.bdAdvanceDays > 0) " · и за ${minutesText(s.bdAdvanceDays * 1440)}" else "",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+        }
+        if (list.isEmpty()) item {
+            Text("Пока пусто. Нажмите «День рождения», выберите дату и подпишите, чей это праздник — дальше напоминать буду каждый год сам.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(32.dp))
+        }
+        if (today.isNotEmpty()) {
+            item { SectionTitle("Сегодня") }
+            items(today, key = { "t${it.id}" }) { BirthdayCard(it, it.time, now, ringing == it.id, onOpen) }
+        }
+        if (soon.isNotEmpty()) {
+            item { SectionTitle("В ближайший месяц") }
+            items(soon, key = { "s${it.id}" }) { BirthdayCard(it, it.time, now, false, onOpen) }
+        }
+        if (later.isNotEmpty()) {
+            item { SectionTitle("Позже") }
+            items(later, key = { "l${it.id}" }) { BirthdayCard(it, it.time, now, false, onOpen) }
         }
     }
 }

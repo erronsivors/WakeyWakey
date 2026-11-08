@@ -49,7 +49,26 @@ fun plural(n: Int, one: String, few: String, many: String): String {
     return "$n $w"
 }
 
-fun Reminder.effMode() = mode ?: Prefs.s.value.mode
+fun Reminder.effMode() = mode ?: if (isBirthday) Prefs.s.value.bdMode else Prefs.s.value.mode
+/** За сколько минут предупредить заранее: у дней рождения — из настроек. */
+fun Reminder.effAdvance() = when {
+    isBirthday -> Prefs.s.value.bdAdvanceDays * 1440
+    advance < 0 -> Prefs.s.value.noteAdvance
+    else -> advance
+}
+
+/** «за 1 день», «за 3 часа» — подпись для «предупредить заранее». */
+fun advanceText(m: Int) = if (m <= 0) "Нет" else "За ${minutesText(m)}"
+
+/** Заголовок уведомления и экрана будильника. */
+fun Reminder.displayTitle() = if (isBirthday) "День рождения: $title" else title.ifBlank { "Напоминание" }
+
+/** Текст под заголовком. */
+fun Reminder.body(): String = if (isBirthday) {
+    val age = Birthdays.age(this, time)
+    listOfNotNull(age?.let { "Исполняется ${plural(it, "год", "года", "лет")}" }, note.ifBlank { null })
+        .joinToString(" · ").ifBlank { "Не забудьте поздравить" }
+} else note.ifBlank { fmtWhen(time) }
 fun Reminder.effInterval() = interval ?: Prefs.s.value.interval
 
 fun notifId(id: Long) = (id % Int.MAX_VALUE).toInt().let { if (it < 100) it + 100 else it }
@@ -79,9 +98,11 @@ object Scheduler {
         cancel(context, r.id)
         if (r.done) return
         val mode = r.effMode()
-        if (mode == Mode.LIGHT && r.fired) return
+        val shownBirthday = r.isBirthday && r.fired
+        if (mode == Mode.LIGHT && r.fired && !shownBirthday) return
         val am = context.getSystemService(AlarmManager::class.java)
-        val at = r.nextRing ?: r.time
+        // день рождения уже показан сегодня — следующий звонок через год
+        val at = if (shownBirthday) Birthdays.next(r, maxOf(System.currentTimeMillis(), r.time)) else r.nextRing ?: r.time
         val ring = pi(context, r.id, KIND_RING)
         try {
             if (mode == Mode.LIGHT) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, ring)
@@ -90,8 +111,9 @@ object Scheduler {
         } catch (e: SecurityException) {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, ring)
         }
-        if (r.advance > 0 && r.nextRing == null) {
-            val a = r.time - r.advance * 60_000L
+        val adv = r.effAdvance()
+        if (adv > 0 && r.nextRing == null) {
+            val a = (if (shownBirthday) at else r.time) - adv * 60_000L
             if (a > System.currentTimeMillis()) try {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, a, pi(context, r.id, KIND_ADVANCE))
             } catch (e: SecurityException) {
@@ -106,19 +128,29 @@ object Scheduler {
 /** Что происходит при звонке и по кнопкам «Завершено» / «Отложить». */
 object Actions {
     fun fire(context: Context, id: Long, kind: String) {
-        val r = Repo.get(id) ?: return
+        var r = Repo.get(id) ?: return
         if (r.done) return
+        if (r.isBirthday && r.fired) {
+            // показанный в прошлый раз день рождения — переходим к этому году
+            val nt = Birthdays.next(r, r.time)
+            r = r.copy(time = nt, fired = false)
+            if (kind == Scheduler.KIND_RING) Repo.upsert(r)
+        }
         if (kind == Scheduler.KIND_ADVANCE) {
-            Notifs.light(context, r, "Через ${minutesText(r.advance)} · ${fmtTime(r.time)}", withDone = false)
+            val text = if (r.isBirthday) "${fmtDay(r.time).replaceFirstChar { it.uppercase() }} день рождения · ${r.body()}"
+            else "${fmtWhen(r.time).replaceFirstChar { it.uppercase() }} · ${r.effMode().title.lowercase()}" +
+                r.note.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+            Notifs.light(context, r, text, withDone = false)
             return
         }
         val now = System.currentTimeMillis()
         val s = Prefs.s.value
         when (val mode = r.effMode()) {
             Mode.LIGHT -> {
-                Notifs.light(context, r, r.note.ifBlank { fmtWhen(r.time) }, withDone = true)
-                // повторяющаяся лайтовая запись сама переходит на следующий раз
-                val n = if (r.repeat != Repeat.NONE) r.copy(time = r.repeat.next(r.time, now), nextRing = null, fired = false)
+                Notifs.light(context, r, r.body(), withDone = true)
+                // день рождения остаётся «сегодня» до «Поздравил»; повторяющаяся запись сама переходит на следующий раз
+                val n = if (r.isBirthday) r.copy(fired = true, nextRing = null)
+                else if (r.repeat != Repeat.NONE) r.copy(time = r.nextAfter(now), nextRing = null, fired = false)
                 else r.copy(fired = true, nextRing = null)
                 Repo.upsert(n)
                 Scheduler.schedule(context, n)
@@ -139,8 +171,8 @@ object Actions {
         val r = Repo.get(id) ?: return
         val now = System.currentTimeMillis()
         val n = if (r.repeat != Repeat.NONE) {
-            r.copy(time = r.repeat.next(r.time, now), nextRing = null, fired = false, done = false).also {
-                App.messages.trySend("Готово. Следующий раз: ${fmtWhen(it.time)}")
+            r.copy(time = r.nextAfter(now), nextRing = null, fired = false, done = false).also {
+                App.messages.trySend(if (r.isBirthday) "Отмечено. Напомню снова ${fmtDay(it.time)}" else "Готово. Следующий раз: ${fmtWhen(it.time)}")
             }
         } else r.copy(done = true, doneAt = now, nextRing = null)
         Repo.upsert(n)
@@ -208,14 +240,15 @@ object Notifs {
     fun base(context: Context, channel: String, r: Reminder, text: String) =
         NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_notif)
-            .setContentTitle(r.title.ifBlank { "Напоминание" })
+            .setContentTitle(r.displayTitle())
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(openApp(context, r.id))
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
     fun doneAction(context: Context, id: Long) =
-        NotificationCompat.Action(0, "Завершено", action(context, ActionReceiver.DONE, id))
+        NotificationCompat.Action(0, if (Repo.get(id)?.isBirthday == true) "Поздравил" else "Завершено",
+            action(context, ActionReceiver.DONE, id))
 
     fun snoozeAction(context: Context, id: Long) =
         NotificationCompat.Action(0, "Отложить на ${minutesText(Prefs.s.value.snoozeMinutes())}", action(context, ActionReceiver.SNOOZE, id))
@@ -236,7 +269,7 @@ object Notifs {
     /** Уведомление во время звонка (оно же — уведомление фоновой службы). */
     fun ringing(context: Context, r: Reminder, mode: Mode): Notification {
         val extreme = mode == Mode.EXTREME
-        val text = r.note.ifBlank { fmtWhen(r.time) }
+        val text = r.body()
         val b = base(context, if (extreme) App.CH_ALARM else App.CH_PERSISTENT, r, text)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(if (extreme) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
@@ -287,6 +320,7 @@ class ActionReceiver : BroadcastReceiver() {
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         App.boot(context)
+        Birthdays.rollPast(context)
         Scheduler.rescheduleAll(context)
     }
 }
