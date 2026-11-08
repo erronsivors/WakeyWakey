@@ -1,0 +1,23 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- колокольчики -->
+    <path android:fillColor="#FFFFB300"
+        android:pathData="M30,40 A10,10 0 0,1 44,26 L30,40 Z" />
+    <path android:fillColor="#FFFFB300"
+        android:pathData="M78,40 A10,10 0 0,0 64,26 L78,40 Z" />
+    <!-- ножки -->
+    <path android:strokeColor="#FFFFB300" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M40,78 L35,84 M68,78 L73,84" />
+    <!-- корпус -->
+    <path android:fillColor="#FFFFB300"
+        android:pathData="M54,32 A23,23 0 1,1 53.99,32 Z" />
+    <!-- циферблат -->
+    <path android:fillColor="#FF2B2D6E"
+        android:pathData="M54,37 A18,18 0 1,1 53.99,37 Z" />
+    <!-- стрелки -->
+    <path android:strokeColor="#FFFFB300" android:strokeWidth="3.5" android:strokeLineCap="round"
+        android:pathData="M54,55 L54,43 M54,55 L62,60" />
+    <path android:fillColor="#FFFFB300"
+        android:pathData="M54,52 A3,3 0 1,1 53.99,52 Z" />
+</vector>
